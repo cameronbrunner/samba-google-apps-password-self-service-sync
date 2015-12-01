@@ -1,0 +1,7 @@
+import sys, os
+sys.path.insert(0, "/var/www/password-change/password_change")
+os.chdir("/var/www/password-change/password_change")
+with open("/tmp/logs","w") as f:
+    f.write("%s" % sys.path)
+    f.flush()
+from main import app as application

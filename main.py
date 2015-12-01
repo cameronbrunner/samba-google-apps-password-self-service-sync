@@ -16,6 +16,7 @@ import json
 import os
 import requests
 import sys
+import tempfile
 
 app = Flask(__name__, static_url_path='')
 app.config.from_pyfile('secrets.cfg') # Add your Google ID & Secret there.
@@ -32,7 +33,7 @@ PROHIBITED_USERS = app.config.get('PROHIBITED_USERS')
 
 ### Samba configuration & settings
 # Add a specific import for the Python Samba packages
-sys.path.append("/usr/local/samba/lib/python2.7/site-packages/")
+sys.path.append("/usr/local/samba/lib64/python2.7/site-packages/")
 
 from samba.credentials import Credentials
 from samba.auth import system_session
@@ -63,36 +64,26 @@ google = oauth.remote_app(
 def current_password_is_correct_on_pdc(username, current_password):
     # Test the user/password combination against local Samba hive.
     # TODO: Implement this.
-    return False
+    f,fname = tempfile.mkstemp()
+    try:
+        os.write(f, "username = %s\n" % username)
+        os.write(f, "password = %s\n" % current_password)
+        os.write(f, "domain = dc.univa.com")
+        ret = os.system("smbclient //localhost/netlogon -A%s -c 'ls'" %fname)
+        #print "Return code", ret
+        return ret == 0
+    finally:
+        os.close(f)
 
 def change_samba_password(username, password):
     # printf "pass\npass\n" | sudo ./smbpasswd -s caroline
     # echo -e 'new_password\nnew_password' | sudo /usr/local/samba/bin/smbpasswd username  # May fail due to constraints
     if username in PROHIBITED_USERS:
         print("ERROR: Prohibited user.")
-        # return False
-    creds = Credentials()
-    samdb = SamDB(url=(sambaPrivate + "/sam.ldb.d/" + sambaPath + ".ldb"), session_info=system_session(), credentials=creds.guess())
+        return False
+    ret = os.system("bash -c 'echo -ne \"%s\n%s\" | sudo /usr/local/samba/bin/smbpasswd %s >/tmp/logs 2>&1'" % (password,password,username) )
+    return ret == 0
 
-    filter = "(&(objectClass=user)(sAMAccountName=%s))" % (username)
-
-    return samdb.setpassword(filter, password, force_change_at_next_login=False, username=username)
-
-
-def change_google_password(username, password):
-    # PUT https://www.googleapis.com/admin/directory/v1/users/user%40example.com?fields=password&key={YOUR_API_KEY}
-    # Content-Type:  application/json
-    # Authorization:  Bearer asdasdasdasdasdasdasdasd (TOKEN)
-    # { "password": "omgOMGomgOMG" }
-
-    url = 'https://www.googleapis.com/admin/directory/v1/users/user%40domain.com?fields=password&key={APIKEYHERE}'
-    headers = {'Content-Type': 'application/json'}
-
-    r = requests.put(url, data=json.dumps(data), headers=headers)
-
-    return json.dumps(r.json(), indent=4)
-    
-    pass
 
 @app.route('/', methods = ['GET', 'POST'])
 def index():
@@ -112,17 +103,18 @@ def index():
         username = me.data['email'].split('@')[0] # username only from e-mail
 
         error=None
+        ok = None
         # User posted, probably wants to set a password, neat!
         if request.method == "POST":
-            current_password = request.form.get('password')
+            #current_password = request.form.get('password')
             new_password = request.form.get('newpass')
 
             # The user set a username & password. Sanity check time.
-            if username not in PROHIBITED_USERS:
+            if username in PROHIBITED_USERS:
                 error = "You are not authorized to use this service."
-            elif new_password is None or current_password is None:
+            elif new_password is None:
                 error = "You left a password empty. Please try again."
-            elif len(new_password) == 0 or len(current_password) == 0:
+            elif len(new_password) == 0:
                 error = "You left a password empty. Please try again."
             elif new_password != request.form.get('confirmpass'):
                 error = "Your passwords didn't match. Please try again."
@@ -130,20 +122,15 @@ def index():
                 error = "Your password was too short. Please enter a longer password."
             elif sum([word in new_password.lower() for word in PASS_BAD_WORDS]) > 0:
                 error = "Your new password cannot contain: %s" % (', '.join(PASS_BAD_WORDS))
-            elif not current_password_is_correct_on_pdc(username, current_password):
-                error = "Your current password was incorrect. Try again."
+            #elif not current_password_is_correct_on_pdc(username, current_password):
+            #    error = "Your current password was incorrect. Try again."
             else:
                 # We've passed sanity testing, let's change the user's password.
 
                 # First, let's set the samba password
                 if change_samba_password(username, new_password):
                     print('Successfully changed samba password.')
-                    if change_google_password(username, new_password):
-                        print('Successfully changed Google password.')
-                    elif change_samba_password(username, current_password):
-                        error = 'Google changing failed. Reverted to original password.'
-                    else:
-                        error = 'Critical error! Passwords have diverged!'
+                    ok = True
                 else:
                     # Samba changing failed. Report that.
                     error = "Couldn't change password: samba failure."
@@ -156,7 +143,8 @@ def index():
                                site_name=SITE_NAME,
                                minlength=PASS_MIN_LENGTH,
                                badwords=PASS_BAD_WORDS,
-                               error=error)
+                               error=error,
+                               ok=ok)
 
     # No google token. Ask the user to log in.
     return render_template('_base.html', site_name=SITE_NAME)
@@ -231,7 +219,7 @@ app.jinja_env.globals['csrf_token'] = generate_csrf_token
 
 if __name__ == '__main__':
     app.debug = True
-    app.run()
+    app.run(host='0.0.0.0', port=5000)
 else:
     # Secure app in prod
     app.config['SESSION_COOKIE_SECURE'] = True

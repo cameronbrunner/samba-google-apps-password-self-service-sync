@@ -44,6 +44,15 @@
                             </div>
                         {% endif %}
 
+                        {% if ok %}
+                            <div class="alert alert-info" role="alert">
+                                <span class="glyphicon glyphicon-ok" aria-hidden="true"></span>
+                                Password Changed Successfully!
+                            </div>
+                        {% endif %}
+
+
+
                         <form role="form" action="#" method="POST">
                             <input name=_csrf_token type=hidden value="{{ csrf_token() }}">
                             <fieldset>
@@ -60,14 +69,6 @@
 													<i class="glyphicon glyphicon-user"></i>
 												</span>
                                                 <input class="form-control" placeholder="Username" name="loginname" type="text" value="{{ auth_data.email }}" disabled>
-                                            </div>
-                                        </div>
-                                        <div class="form-group">
-                                            <div class="input-group">
-												<span class="input-group-addon">
-													<i class="glyphicon glyphicon-lock"></i>
-												</span>
-                                                <input class="form-control" placeholder="Current Password" name="password" type="password" value="" autofocus>
                                             </div>
                                         </div>
                                         <div class="form-group">
